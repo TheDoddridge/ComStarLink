@@ -17,4 +17,4 @@ RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-CMD ["/app/comstar"]
+CMD ["/app/mercenary_board"]
