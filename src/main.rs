@@ -34,19 +34,28 @@ struct Contract {
 
     #[serde(default)]
     mission_type: String,
+
     bv2: String,
+    #[serde(default)]
+    pv: String,
+    #[serde(default)]
+    bsp: String,
+
     era: String,
     map: String,
     intel_level: String,
     match_time: String,
+
     #[serde(default)]
     expires_at: i64,
+
     force_comp: String,
     ruleset: String,
     optional_rules: Vec<String>,
     status: String,
     comments: Vec<Comment>,
 }
+
 #[derive(Clone)]
 struct AppState {
     db: sled::Db,
@@ -73,40 +82,57 @@ struct CommentForm {
     text: String,
 }
 
-fn format_force(force_string: &str, intel_level: &str) -> String {
+// --- HELPER FUNCTIONS ---
+
+fn format_force(force_string: &str, intel_level: &str, is_owner: bool) -> String {
     if force_string.is_empty() {
-        return "None".to_string();
+        return "<span class='term-dim'>[ NONE SPECIFIED ]</span>".to_string();
     }
 
-    if intel_level.contains("Blackout") {
-        return "<span style='color: #ff7b72;'>[ CLASSIFIED ]</span>".to_string();
-    }
+    if !is_owner {
+        if intel_level.contains("Blackout") {
+            return "<span class='term-alert'>[ CLASSIFIED / SIGNAL LOST ]</span>".to_string();
+        }
 
-    if intel_level.contains("Intercept") {
-        let mut counts: HashMap<String, u32> = HashMap::new();
+        if intel_level.contains("Intercept") {
+            let mut counts: HashMap<String, u32> = HashMap::new();
 
-        for unit in force_string.split(',') {
-            if let Some(start) = unit.find('[') {
-                if let Some(end) = unit.find(']') {
-                    let class = &unit[start + 1..end];
-                    *counts.entry(class.to_string()).or_insert(0) += 1;
+            for unit in force_string.split(',') {
+                if let Some(start) = unit.find('[') {
+                    if let Some(end) = unit.find(']') {
+                        let class = &unit[start + 1..end];
+                        *counts.entry(class.to_string()).or_insert(0) += 1;
+                    }
                 }
             }
-        }
 
-        let mut summary = Vec::new();
-        for (class, count) in counts {
-            summary.push(format!("{}x {}", count, class));
-        }
-        summary.sort();
+            let mut summary = Vec::new();
+            for (class, count) in counts {
+                summary.push(format!("{}x {}", count, class));
+            }
+            summary.sort();
 
-        if summary.is_empty() {
-            return "<span style='color: #e3b341;'>[ ENCRYPTED / UNKNOWN ]</span>".to_string();
+            if summary.is_empty() {
+                return "<span class='term-dim'>[ ENCRYPTED / UNKNOWN ]</span>".to_string();
+            }
+            return format!(
+                "<span class='term-dim'>[ PARTIAL INTERCEPT: {} ]</span>",
+                summary.join(", ")
+            );
         }
-        return summary.join(", ");
     }
 
-    force_string.replace(",", "<br>• ")
+    // Full Sweep OR Current User is the Owner
+    let mut formatted = force_string.replace(",", "<br>• ");
+
+    if is_owner && (intel_level.contains("Blackout") || intel_level.contains("Intercept")) {
+        formatted = format!(
+            "{} <br><span class='term-dim' style='margin-top: 10px; display: inline-block;'><em>(Visible only to you - Intel level hides this from others)</em></span>", 
+            formatted
+        );
+    }
+
+    formatted
 }
 
 fn current_unix_timestamp() -> i64 {
@@ -123,14 +149,10 @@ fn cleanup_expired_contracts(db: &sled::Db) {
         let Ok((key, value)) = item else {
             continue;
         };
-
         let Ok(contract) = serde_json::from_slice::<Contract>(&value) else {
             continue;
         };
 
-        // expires_at == 0 means this is an older contract created before
-        // expiration tracking was added. Leave it alone rather than risking
-        // deleting an existing contract that cannot be safely dated.
         if contract.expires_at > 0 && now >= contract.expires_at {
             let _ = db.remove(key);
         }
@@ -140,92 +162,121 @@ fn cleanup_expired_contracts(db: &sled::Db) {
 // --- HTML RENDERING ---
 
 fn render_contract(c: &Contract, current_user: &str) -> String {
-    let host_force_display = format_force(&c.host_force, &c.intel_level);
-    let bv2_display = if c.bv2.is_empty() {
-        "Open".to_string()
-    } else {
-        c.bv2.clone()
-    };
+    let is_host = current_user == c.host;
+    let is_challenger = Some(current_user.to_string()) == c.challenger;
+
+    let host_force_display = format_force(&c.host_force, &c.intel_level, is_host);
     let host_assets_display = if c.host_assets.is_empty() {
-        "None".to_string()
+        "NONE".to_string()
     } else {
         c.host_assets.clone()
     };
+    let display_time_fallback = c.match_time.replace("T", " ");
+
+    // Dynamic Display for BV / PV / BSP
+    let mut points_display = String::new();
+    if c.ruleset == "Alpha Strike" {
+        let pv_val = if c.pv.is_empty() {
+            "OPEN".to_string()
+        } else {
+            c.pv.clone()
+        };
+        points_display.push_str(&format!(
+            r#"<div><span class="term-label">TARGET PV:</span> {}</div>"#,
+            pv_val
+        ));
+    } else {
+        let bv_val = if c.bv2.is_empty() {
+            "OPEN".to_string()
+        } else {
+            c.bv2.clone()
+        };
+        points_display.push_str(&format!(
+            r#"<div><span class="term-label">TARGET BV:</span> {}</div>"#,
+            bv_val
+        ));
+    }
+
+    if !c.bsp.is_empty() {
+        points_display.push_str(&format!(
+            r#"<div><span class="term-label">TARGET BSP:</span> {}</div>"#,
+            c.bsp
+        ));
+    }
 
     // 1. Action Area (Accept / Transfer / Withdraw logic)
     let action_html = if c.status == "Open" {
-        if current_user == c.host {
-            r##"<div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #39d353;">
-                <em>[ Awaiting Challenger Signatures... ]</em>
+        if is_host {
+            r##"<div class="panel-divider">
+                <em class="term-dim">[ AWAITING CHALLENGER SIGNATURES... ]</em>
             </div>"##
                 .to_string()
         } else {
             format!(
-                r##"<form hx-post="/contract/{id}/accept" hx-target="#contract-{id}" hx-swap="outerHTML" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #39d353;">
-                    <strong style="color: #ff7b72;">:: ACCEPT CONTRACT ::</strong>
+                r##"<form hx-post="/contract/{id}/accept" hx-target="#contract-{id}" hx-swap="outerHTML" class="panel-divider">
+                    <strong>:: ACCEPT CONTRACT ::</strong>
                     
-                    <div style="margin-top: 10px;">
-                        <label>Challenger Force Roster:</label>
+                    <div class="panel" style="margin-top: 15px;">
+                        <label class="term-label">CHALLENGER FORCE ROSTER:</label>
                         <div style="display:flex; gap:10px; margin-top:5px;">
-                            <input type="text" id="challenger-unit-search-{id}" list="unit-datalist" placeholder="Search Unit..." style="margin-bottom:0;">
-                            <button type="button" onclick="addUnit('challenger', '{id}')" style="margin-bottom:0; width:auto;">ADD</button>
+                            <input type="text" id="challenger-unit-search-{id}" list="unit-datalist" placeholder="SEARCH UNIT..." style="margin-bottom:0;">
+                            <button type="button" onclick="addUnit('challenger', '{id}')" style="margin-bottom:0; width:auto;" class="btn-outline">ADD</button>
                         </div>
-                        <ul id="challenger-roster-list-{id}" style="list-style: none; padding: 0; margin: 10px 0; font-size: 0.9em;"></ul>
+                        <ul id="challenger-roster-list-{id}" class="roster-list"></ul>
                         <input type="hidden" name="challenger_force" id="challenger_force_input_{id}" value="">
+                        
+                        <label class="term-label" style="margin-top: 15px; display: block;">ASSETS (OPTIONAL):</label>
+                        <input type="text" name="challenger_assets" placeholder="E.G. TOKENS, MAPS" style="margin-top: 5px;">
                     </div>
-                    
-                    <input type="text" name="challenger_assets" placeholder="Assets (e.g., Dice & Tukayyid maps)" style="margin-top: 10px;">
-                    <button type="submit" style="background: #ff7b72; color: #0d1117; border-color: #ff7b72;">LOCK MATCH</button>
+                    <button type="submit" class="btn-solid" style="width: 100%;">LOCK MATCH</button>
                 </form>"##,
                 id = c.id
             )
         }
     } else {
-        // Match is Locked. Generate context-sensitive buttons.
         let mut action_buttons = String::new();
 
-        if current_user == c.host {
-            // The Host can transfer command if they need to bail
+        if is_host {
             action_buttons.push_str(&format!(
-                r##"<button hx-post="/contract/{id}/transfer" hx-target="#contract-{id}" hx-swap="outerHTML" style="background: transparent; color: #58a6ff; border: 1px solid #58a6ff; width: auto; margin-bottom: 0; padding: 5px 10px;">
+                r##"<button hx-post="/contract/{id}/transfer" hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-outline" style="width: auto; margin-bottom: 0; padding: 5px 10px;">
                     TRANSFER COMMAND TO CHALLENGER
-                </button>"##,
-                id = c.id
+                </button>"##, id = c.id
             ));
-        } else if Some(current_user.to_string()) == c.challenger {
-            // The Challenger can withdraw
+        } else if is_challenger {
             action_buttons.push_str(&format!(
-                r##"<button hx-post="/contract/{id}/withdraw" hx-target="#contract-{id}" hx-swap="outerHTML" style="background: #ff7b72; color: #0d1117; border-color: #ff7b72; width: auto; margin-bottom: 0; padding: 5px 10px;">
+                r##"<button hx-post="/contract/{id}/withdraw" hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-alert" style="width: auto; margin-bottom: 0; padding: 5px 10px;">
                     WITHDRAW
-                </button>"##,
-                id = c.id
+                </button>"##, id = c.id
             ));
         }
 
-        let challenger_force_display =
-            format_force(c.challenger_force.as_deref().unwrap_or(""), &c.intel_level);
+        let challenger_force_display = format_force(
+            c.challenger_force.as_deref().unwrap_or(""),
+            &c.intel_level,
+            is_challenger,
+        );
         let challenger_assets = c.challenger_assets.as_deref().unwrap_or("").trim();
         let challenger_assets_display = if challenger_assets.is_empty() {
-            "None"
+            "NONE"
         } else {
             challenger_assets
         };
 
         let challenger_info = format!(
-            r##"<div style="margin-top: 10px; padding: 10px; background: #0d1117; border: 1px solid #ff7b72;">
-                <strong>Challenger:</strong> {challenger}<br>
-                <strong>Force:</strong> <br>• {force}<br>
-                <strong style="margin-top: 5px; display: inline-block;">Assets:</strong> {assets}
+            r##"<div class="panel">
+                <div style="margin-bottom: 10px;"><strong class="term-label">:: CHALLENGER IDENTIFIED ::</strong> {challenger}</div>
+                <div style="margin-bottom: 15px;">• {force}</div>
+                <div><span class="term-label">ASSETS:</span> {assets}</div>
             </div>"##,
-            challenger = c.challenger.as_deref().unwrap_or("Unknown"),
+            challenger = c.challenger.as_deref().unwrap_or("UNKNOWN"),
             force = challenger_force_display,
             assets = challenger_assets_display,
         );
 
         format!(
-            r##"<div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #39d353;">
-                <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
-                    <span class="accepted">[ MATCH LOCKED - AWAITING DEPLOYMENT ]</span>
+            r##"<div class="panel-divider">
+                <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px;">
+                    <strong>[ MATCH LOCKED - AWAITING DEPLOYMENT ]</strong>
                     {action_buttons}
                 </div>
                 {challenger_info}
@@ -238,24 +289,30 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
     // 2. Comments Area
     let mut comments_html = String::new();
     for comment in &c.comments {
+        let is_host_comment = comment.author == c.host;
+        let prefix = if is_host_comment { "[HOST]" } else { "[CHAL]" };
+
         comments_html.push_str(&format!(
-            r##"<div style="margin-top: 5px; font-size: 0.9em;"><strong>{author}:</strong> {text}</div>"##,
+            r##"<div style="margin-top: 10px;">
+                <strong class="term-dim">{prefix} {author}:</strong><br> {text}
+            </div>"##,
+            prefix = prefix,
             author = comment.author,
             text = comment.text
         ));
     }
 
     if comments_html.is_empty() {
-        comments_html = "<em>No encrypted comms.</em>".to_string();
+        comments_html = "<em class='term-dim'>[ NO ENCRYPTED COMMS ]</em>".to_string();
     }
 
     let comments_section = format!(
-        r##"<div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #39d353;">
-            <strong style="color: #58a6ff;">:: COMMS CHANNEL ::</strong>
-            <div style="margin-bottom: 10px; max-height: 150px; overflow-y: auto;">{comments_html}</div>
-            <form hx-post="/contract/{id}/comment" hx-target="#contract-{id}" hx-swap="outerHTML" style="display: flex; gap: 10px;">
-                <input type="text" name="text" placeholder="Transmit message..." required style="margin-bottom: 0;">
-                <button type="submit" style="margin-bottom: 0; width: auto; padding: 0 20px;">SEND</button>
+        r##"<div class="panel" style="margin-top: 20px;">
+            <strong>:: COMMS CHANNEL ::</strong>
+            <div style="margin: 15px 0; max-height: 200px; overflow-y: auto;">{comments_html}</div>
+            <form hx-post="/contract/{id}/comment" hx-target="#contract-{id}" hx-swap="outerHTML" style="display: flex; gap: 10px; margin-bottom: 0;">
+                <input type="text" name="text" placeholder="TRANSMIT MESSAGE..." required style="margin-bottom: 0;">
+                <button type="submit" class="btn-solid" style="margin-bottom: 0; width: auto; padding: 0 20px;">SEND</button>
             </form>
         </div>"##,
         id = c.id,
@@ -264,14 +321,13 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
 
     // 3. Optional Rules and Final Assembly
     let optional_rules_html = if c.optional_rules.is_empty() {
-        "None".to_string()
+        "NONE".to_string()
     } else {
         c.optional_rules.join(", ")
     };
-
-    let cancel_button = if current_user == c.host {
+    let cancel_button = if is_host {
         format!(
-            r##"<button hx-delete="/contract/{id}" hx-confirm="Are you sure you want to scrub this mission? This cannot be undone." hx-target="#contract-{id}" hx-swap="outerHTML" style="background: transparent; color: #ff7b72; border: 1px solid #ff7b72; padding: 5px 10px; margin-top: 15px; width: 100%;">
+            r##"<button hx-delete="/contract/{id}" hx-confirm="SCRUB MISSION? THIS CANNOT BE UNDONE." hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-alert" style="margin-top: 20px; width: 100%;">
                 SCRUB MISSION (CANCEL CONTRACT)
             </button>"##,
             id = c.id
@@ -282,21 +338,29 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
 
     format!(
         r##"<div class="card" id="contract-{id}">
-            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #39d353; margin-bottom: 10px; padding-bottom: 5px;">
-                <strong>Contract #{id} - Host: {host}</strong>
-                <span style="color: #e3b341;" class="countdown" data-time="{match_time}">CALCULATING JUMP...</span>
+            <div class="card-header">
+                <span><strong>CONTRACT #{id}</strong> // HOST: {host}</span>
+                <span>
+                    [ <span class="exact-time" data-time="{match_time}">{display_time_fallback}</span> | 
+                    <span class="countdown" data-time="{match_time}">CALCULATING...</span> ]
+                </span>
             </div>
             
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div>
-                    <strong>Parameters:</strong> {mission_type} | {bv2} BV | {force_comp} | {era}<br>
-                    <strong>Intel Level:</strong> {intel_level}<br>
-                    <strong>Ruleset:</strong> {ruleset}<br>
-                    <strong>Optional Rules:</strong> {optional_rules_html}
+            <div class="form-grid">
+                <div class="panel">
+                    <div><span class="term-label">MISSION:</span> {mission_type}</div>
+                    {points_display}
+                    <div><span class="term-label">FORCE COMP:</span> {force_comp}</div>
+                    <div><span class="term-label">ERA:</span> {era}</div>
+                    <div><span class="term-label">INTEL:</span> {intel_level}</div>
+                    <div style="margin-top: 10px;"><span class="term-label">RULESET:</span> {ruleset}</div>
+                    <div><span class="term-label">OPT RULES:</span> {optional_rules_html}</div>
                 </div>
-                <div style="border-left: 1px dashed #39d353; padding-left: 10px;">
-                    <strong>Host Force:</strong><br>• {host_force_display}<br>
-                    <strong style="margin-top: 5px; display: inline-block;">Host Assets:</strong> {host_assets}
+
+                <div class="panel">
+                    <div style="margin-bottom: 10px;"><strong class="term-label">:: HOST FORCE DEPLOYMENT ::</strong></div>
+                    <div style="margin-bottom: 15px;">• {host_force_display}</div>
+                    <div><span class="term-label">ASSETS:</span> {host_assets}</div>
                 </div>
             </div>
             
@@ -307,8 +371,9 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         id = c.id,
         host = c.host,
         match_time = c.match_time,
+        display_time_fallback = display_time_fallback,
         mission_type = c.mission_type,
-        bv2 = bv2_display,
+        points_display = points_display,
         force_comp = c.force_comp,
         era = c.era,
         intel_level = c.intel_level,
@@ -337,29 +402,119 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
         <title>LGS ComStar Terminal</title>
         <script src="https://unpkg.com/htmx.org@1.9.10"></script>
         <style>
-            body {{ background-color: #0d1117; color: #39d353; font-family: monospace; max-width: 900px; margin: 0 auto; padding: 20px; }}
-            .card {{ border: 1px solid #39d353; padding: 15px; margin-bottom: 20px; background: #161b22; }}
-            input, select, button {{ background: #0d1117; border: 1px solid #39d353; color: #39d353; padding: 8px; font-family: monospace; margin-bottom: 10px; width: 100%; box-sizing: border-box; }}
-            
-            input[type="datetime-local"]::-webkit-calendar-picker-indicator {{
-                cursor: pointer;
-                filter: invert(72%) sepia(35%) saturate(1005%) hue-rotate(75deg) brightness(99%) contrast(90%);
+            :root {{
+                --term-bg: #050505;
+                --term-fg: #ffb000;
+                --term-dim: #a67300;
+                --term-alert: #ff3333;
+                --term-panel: #0a0a0a;
             }}
 
-            button {{ cursor: pointer; font-weight: bold; width: auto; padding: 10px 20px; transition: 0.2s; }}
-            button:hover {{ background: #39d353; color: #0d1117; }}
-            .accepted {{ color: #ff7b72; border-color: #ff7b72; font-weight: bold; }}
-            .form-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }}
-            .checkbox-group {{ margin: 10px 0; border: 1px dashed #39d353; padding: 10px; }}
-            .checkbox-group label {{ display: block; cursor: pointer; margin-bottom: 5px; }}
-            .checkbox-group input {{ width: auto; margin-right: 10px; }}
-            .top-bar {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #39d353; margin-bottom: 20px; padding-bottom: 10px; }}
+            body {{ 
+                background-color: var(--term-bg); 
+                color: var(--term-fg); 
+                font-family: 'Courier New', Courier, monospace; 
+                font-size: 16px;
+                max-width: 900px; 
+                margin: 0 auto; 
+                padding: 20px; 
+                text-shadow: 0 0 2px rgba(255, 176, 0, 0.4);
+                line-height: 1.4;
+            }}
+
+            h2, h3 {{ margin-top: 0; text-transform: uppercase; font-weight: bold; letter-spacing: 1px; }}
+            
+            .term-label {{ color: var(--term-dim); font-weight: bold; margin-right: 5px; text-transform: uppercase; }}
+            .term-dim {{ color: var(--term-dim); }}
+            .term-alert {{ color: var(--term-alert); text-shadow: 0 0 4px rgba(255, 51, 51, 0.6); }}
+
+            .card {{ 
+                border: 1px solid var(--term-fg); 
+                padding: 20px; 
+                margin-bottom: 30px; 
+                background: var(--term-bg); 
+                box-shadow: inset 0 0 10px rgba(255, 176, 0, 0.05);
+            }}
+
+            .card-header {{
+                display: flex; 
+                justify-content: space-between; 
+                border-bottom: 1px dashed var(--term-dim); 
+                margin-bottom: 20px; 
+                padding-bottom: 10px;
+                text-transform: uppercase;
+            }}
+
+            .panel {{ 
+                padding: 15px; 
+                background: var(--term-panel); 
+                border: 1px dashed var(--term-dim); 
+            }}
+            
+            .panel-divider {{
+                margin-top: 20px; 
+                padding-top: 20px; 
+                border-top: 1px dashed var(--term-dim);
+            }}
+
+            input, select, button {{ 
+                background: var(--term-bg); 
+                border: 1px solid var(--term-dim); 
+                color: var(--term-fg); 
+                padding: 10px; 
+                font-family: inherit; 
+                font-size: 1rem;
+                margin-bottom: 15px; 
+                width: 100%; 
+                box-sizing: border-box; 
+                text-transform: uppercase;
+            }}
+            
+            input:focus, select:focus {{ outline: none; border-color: var(--term-fg); box-shadow: 0 0 5px rgba(255, 176, 0, 0.3); }}
+
+            input[type="datetime-local"]::-webkit-calendar-picker-indicator {{
+                cursor: pointer;
+                filter: invert(65%) sepia(85%) saturate(1450%) hue-rotate(1deg) brightness(105%) contrast(105%);
+            }}
+
+            button {{ cursor: pointer; font-weight: bold; transition: background-color 0.1s; text-transform: uppercase; }}
+            button:hover {{ background: var(--term-dim); color: var(--term-bg); }}
+            
+            .btn-solid {{ background: var(--term-fg); color: var(--term-bg); border-color: var(--term-fg); }}
+            .btn-solid:hover {{ background: var(--term-dim); border-color: var(--term-dim); color: var(--term-bg); }}
+            
+            .btn-outline {{ background: transparent; color: var(--term-fg); border-color: var(--term-fg); }}
+            .btn-outline:hover {{ background: var(--term-fg); color: var(--term-bg); }}
+
+            .btn-alert {{ background: transparent; color: var(--term-alert); border-color: var(--term-alert); }}
+            .btn-alert:hover {{ background: var(--term-alert); color: var(--term-bg); }}
+
+            .form-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }}
+            
+            .checkbox-group {{ margin: 15px 0; border: 1px dashed var(--term-dim); padding: 15px; background: var(--term-panel); }}
+            .checkbox-group label {{ display: flex; align-items: center; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; }}
+            .checkbox-group input {{ width: auto; margin-right: 15px; margin-bottom: 0; }}
+            .checkbox-group label:last-child {{ margin-bottom: 0; }}
+
+            .top-bar {{ 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center; 
+                border-bottom: 2px solid var(--term-fg); 
+                margin-bottom: 30px; 
+                padding-bottom: 10px; 
+                text-transform: uppercase;
+            }}
+
+            .roster-list {{ list-style: none; padding: 0; margin: 10px 0; }}
+            .roster-list li {{ border-left: 2px solid var(--term-fg); padding-left: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; background: var(--term-panel); padding: 8px; }}
+            .roster-list li button {{ width: auto; margin: 0; padding: 4px 10px; }}
         </style>
     </head>
     <body>
         <div class="top-bar">
             <h2>:: MERCENARY REVIEW BOARD ::</h2>
-            <span>Logged in as: <strong style="color: #58a6ff;">{current_user}</strong></span>
+            <span>LOGGED IN AS: <strong>{current_user}</strong></span>
         </div>
         
         <datalist id="unit-datalist">
@@ -367,87 +522,101 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
         </datalist>
 
         <div class="card">
-            <h3 style="margin-top:0;">Post New Contract</h3>
+            <h3>:: INITIALIZE NEW CONTRACT ::</h3>
             <form hx-post="/contract" hx-target="#board" hx-swap="afterbegin">
                 <div class="form-grid">
                     <div>
-                        <label>Date & Time:</label>
+                        <label class="term-label">DATE & TIME:</label>
                         <input type="datetime-local" name="match_time" required>
                         <input type="hidden" name="match_epoch" id="match_epoch_input" value="">
                     </div>
+                    
                     <div>
-                        <label>Target BV:</label>
-                        <input type="number" name="bv2" placeholder="e.g. 5000">
+                        <label class="term-label">RULESET:</label>
+                        <select name="ruleset" hx-get="/ui/ruleset-options" hx-target="#optional-rules" hx-swap="innerHTML" onchange="handleRulesetChange(this)">
+                            <option value="Core Rules (2026)">CORE RULES (2026)</option>
+                            <option value="Total Warfare">TOTAL WARFARE</option>
+                            <option value="Introductory">INTRODUCTORY</option>
+                            <option value="Alpha Strike">ALPHA STRIKE</option>
+                        </select>
                     </div>
+
+                    <div id="bv-container">
+                        <label class="term-label">TARGET BV:</label>
+                        <input type="number" name="bv2" placeholder="E.G. 5000">
+                    </div>
+
+                    <div id="pv-container" style="display: none;">
+                        <label class="term-label">TARGET PV (ALPHA STRIKE):</label>
+                        <input type="number" name="pv" placeholder="E.G. 250">
+                    </div>
+
+                    <div id="bsp-container" style="display: none;">
+                        <label class="term-label">TARGET BSP (SUPPORT POINTS):</label>
+                        <input type="number" id="bsp-input" name="bsp" placeholder="E.G. 50">
+                    </div>
+                    
                     <div>
-                        <label>Mission Type:</label>
+                        <label class="term-label">MISSION TYPE:</label>
                         <select name="mission_type">
-                            <option value="Skirmish">Stand-Up Fight</option>
-                            <option value="Breakthrough">Objective Raid</option>
-                            <option value="Base Assault">Extraction</option>
-                            <option value="Reconnaisance">Hold the Line</option>
-                            <option value="Campaign Scenario">Campaign Scenario</option>
+                            <option value="Skirmish">STAND-UP FIGHT</option>
+                            <option value="Breakthrough">OBJECTIVE RAID</option>
+                            <option value="Base Assault">EXTRACTION</option>
+                            <option value="Reconnaisance">HOLD THE LINE</option>
+                            <option value="Campaign Scenario">CAMPAIGN SCENARIO</option>
                         </select>
                     </div>
                     <div>
-                        <label>Force Composition:</label>
+                        <label class="term-label">FORCE COMPOSITION:</label>
                         <select name="force_comp">
-                            <option value="BattleMech Only">BattleMech Only</option>
-                            <option value="Combined Arms">Combined Arms</option>
+                            <option value="BattleMech Only">BATTLEMECH ONLY</option>
+                            <option value="Combined Arms">COMBINED ARMS</option>
                         </select>
                     </div>
                     
-                    <div style="grid-column: span 2; border: 1px dashed #39d353; padding: 10px;">
-                        <label>Host Force Roster:</label>
-                        <div style="display:flex; gap:10px; margin-top:5px;">
-                            <input type="text" id="host-unit-search" list="unit-datalist" placeholder="Search Unit (e.g. Atlas AS7-D)..." style="margin-bottom:0;">
-                            <button type="button" onclick="addUnit('host')" style="margin-bottom:0; width:auto;">ADD TO ROSTER</button>
+                    <div class="panel" style="grid-column: span 2;">
+                        <label class="term-label">HOST FORCE ROSTER:</label>
+                        <div style="display:flex; gap:10px; margin-top:10px;">
+                            <input type="text" id="host-unit-search" list="unit-datalist" placeholder="SEARCH UNIT (E.G. ATLAS AS7-D)..." style="margin-bottom:0;">
+                            <button type="button" onclick="addUnit('host')" style="margin-bottom:0; width:auto;" class="btn-outline">ADD TO ROSTER</button>
                         </div>
-                        <ul id="host-roster-list" style="list-style: none; padding: 0; margin: 10px 0; font-size: 0.9em;"></ul>
+                        <ul id="host-roster-list" class="roster-list"></ul>
                         <input type="hidden" name="host_force" id="host_force_input" value="" required>
                     </div>
 
                     <div style="grid-column: span 2;">
-                        <label>Host Assets (Optional):</label>
-                        <input type="text" name="host_assets" placeholder="e.g. Desert Mats, Tokens, 3D Terrain">
+                        <label class="term-label">HOST ASSETS (OPTIONAL):</label>
+                        <input type="text" name="host_assets" placeholder="E.G. DESERT MATS, TOKENS, 3D TERRAIN">
                     </div>
                     
                     <div>
-                        <label>Era:</label>
+                        <label class="term-label">ERA:</label>
                         <select name="era">
-                            <option value="ilClan">ilClan</option>
-                            <option value="Dark Age">Dark Age</option>
-                            <option value="Jihad">Jihad</option>
-                            <option value="Civil War">Civil War</option>
-                            <option value="Clan Invasion">Clan Invasion</option>
-                            <option value="Succession Wars">Succession Wars</option>
-                            <option value="Star League">Star League</option>
+                            <option value="ilClan">ILCLAN</option>
+                            <option value="Dark Age">DARK AGE</option>
+                            <option value="Jihad">JIHAD</option>
+                            <option value="Civil War">CIVIL WAR</option>
+                            <option value="Clan Invasion">CLAN INVASION</option>
+                            <option value="Succession Wars">SUCCESSION WARS</option>
+                            <option value="Star League">STAR LEAGUE</option>
                         </select>
                     </div>
                     <div>
-                        <label>Intel Level:</label>
+                        <label class="term-label">INTEL LEVEL:</label>
                         <select name="intel_level">
-                            <option value="Full Sweep (Revealed)">Full Sweep (Revealed)</option>
-                            <option value="Partial Intercept">Partial Intercept</option>
-                            <option value="Total Blackout (Blind)">Total Blackout (Blind)</option>
-                        </select>
-                    </div>
-                    <div style="grid-column: span 2;">
-                        <label>Ruleset:</label>
-                        <select name="ruleset" hx-get="/ui/ruleset-options" hx-target="#optional-rules" hx-swap="innerHTML">
-                            <option value="Core Rules (2026)">Core Rules (2026)</option>
-                            <option value="Total Warfare">Total Warfare</option>
-                            <option value="Introductory">Introductory</option>
+                            <option value="Full Sweep (Revealed)">FULL SWEEP (REVEALED)</option>
+                            <option value="Partial Intercept">PARTIAL INTERCEPT</option>
+                            <option value="Total Blackout (Blind)">TOTAL BLACKOUT (BLIND)</option>
                         </select>
                     </div>
                 </div>
 
                 <div id="optional-rules" class="checkbox-group">
-                    <label><input type="checkbox" name="rule_battlefield_support_assets"> Battlefield Support Assets</label>
-                    <label><input type="checkbox" name="rule_battlefield_support_strikes"> Battlefield Support Strikes</label>
+                    <label><input type="checkbox" name="rule_battlefield_support_assets" onchange="toggleBsp()"> BATTLEFIELD SUPPORT ASSETS</label>
+                    <label><input type="checkbox" name="rule_battlefield_support_strikes" onchange="toggleBsp()"> BATTLEFIELD SUPPORT STRIKES</label>
                 </div>
 
-                <button type="submit">TRANSMIT CONTRACT</button>
+                <button type="submit" class="btn-solid" style="width: 100%;">TRANSMIT CONTRACT</button>
             </form>
         </div>
 
@@ -457,10 +626,39 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
         current_user = current_user,
         unit_datalist = units::UNIT_DATALIST_HTML
     );
+
     let footer = r##"
         </div>
 
         <script>
+            function handleRulesetChange(select) {
+                const bvContainer = document.getElementById('bv-container');
+                const pvContainer = document.getElementById('pv-container');
+                
+                if (select.value === 'Alpha Strike') {
+                    bvContainer.style.display = 'none';
+                    pvContainer.style.display = 'block';
+                } else {
+                    bvContainer.style.display = 'block';
+                    pvContainer.style.display = 'none';
+                }
+            }
+
+            function toggleBsp() {
+                const bsa = document.querySelector('input[name="rule_battlefield_support_assets"]');
+                const bss = document.querySelector('input[name="rule_battlefield_support_strikes"]');
+                const bspContainer = document.getElementById('bsp-container');
+                
+                if ((bsa && bsa.checked) || (bss && bss.checked)) {
+                    bspContainer.style.display = 'block';
+                } else {
+                    bspContainer.style.display = 'none';
+                    document.getElementById('bsp-input').value = ''; 
+                }
+            }
+            
+            window.toggleBsp = toggleBsp;
+
             function addUnit(prefix, id = '') {
                 const searchId = id ? `${prefix}-unit-search-${id}` : `${prefix}-unit-search`;
                 const listId = id ? `${prefix}-roster-list-${id}` : `${prefix}-roster-list`;
@@ -474,12 +672,6 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                 const hiddenInput = document.getElementById(hiddenId);
 
                 const li = document.createElement('li');
-                li.style.borderLeft = "2px solid #39d353";
-                li.style.paddingLeft = "5px";
-                li.style.marginBottom = "5px";
-                li.style.display = "flex";
-                li.style.justifyContent = "space-between";
-                li.style.alignItems = "center";
                 
                 const textSpan = document.createElement('span');
                 textSpan.innerText = val;
@@ -487,12 +679,7 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                 
                 const removeBtn = document.createElement('button');
                 removeBtn.innerText = 'X';
-                removeBtn.style.padding = '2px 5px';
-                removeBtn.style.marginLeft = '10px';
-                removeBtn.style.background = 'transparent';
-                removeBtn.style.color = '#ff7b72';
-                removeBtn.style.border = '1px solid #ff7b72';
-                removeBtn.type = 'button';
+                removeBtn.className = 'btn-alert';
                 
                 removeBtn.onclick = () => { 
                     li.remove(); 
@@ -534,7 +721,6 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                 }
 
                 updateMatchEpoch();
-
                 if (timeInput) {
                     timeInput.addEventListener('change', updateMatchEpoch);
                 }
@@ -544,6 +730,19 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     contractForm.addEventListener('submit', updateMatchEpoch);
                 }
             });
+            
+            function formatExactTimes() {
+                document.querySelectorAll('.exact-time:not(.initialized)').forEach(el => {
+                    const d = new Date(el.dataset.time);
+                    if (!isNaN(d)) {
+                        el.innerText = d.toLocaleString(undefined, { 
+                            weekday: 'short', month: 'short', day: 'numeric', 
+                            hour: '2-digit', minute: '2-digit' 
+                        }).toUpperCase();
+                    }
+                    el.classList.add('initialized');
+                });
+            }
 
             function updateCountdowns() {
                 document.querySelectorAll('.countdown').forEach(el => {
@@ -554,7 +753,7 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     if (isNaN(target)) return;
                     
                     if (diff < 0) { 
-                        el.innerText = "[ DEPLOYMENT IN PROGRESS ]"; 
+                        el.innerText = "T-MINUS: 0d 0h 0m"; 
                         return; 
                     }
                     
@@ -564,11 +763,15 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     el.innerText = `T-MINUS: ${d}d ${h}h ${m}m`;
                 });
             }
+            
             setInterval(updateCountdowns, 60000); 
             updateCountdowns(); 
+            formatExactTimes();
 
             document.body.addEventListener('htmx:afterSwap', function(evt) {
+                toggleBsp();
                 updateCountdowns();
+                formatExactTimes();
             });
         </script>
     </body>
@@ -591,19 +794,26 @@ async fn get_board(jar: CookieJar, State(state): State<AppState>) -> Html<String
             <head>
                 <title>LGS ComStar Terminal - Login</title>
                 <style>
-                    body { background-color: #0d1117; color: #39d353; font-family: monospace; max-width: 400px; margin: 100px auto; padding: 20px; text-align: center; }
-                    .card { border: 1px solid #39d353; padding: 20px; background: #161b22; }
-                    input, button { background: #0d1117; border: 1px solid #39d353; color: #39d353; padding: 10px; font-family: monospace; margin-bottom: 15px; width: 100%; box-sizing: border-box; }
-                    button { cursor: pointer; font-weight: bold; }
-                    button:hover { background: #39d353; color: #0d1117; }
+                    :root {
+                        --term-bg: #050505;
+                        --term-fg: #ffb000;
+                        --term-dim: #a67300;
+                    }
+                    body { background-color: var(--term-bg); color: var(--term-fg); font-family: 'Courier New', Courier, monospace; font-size: 16px; max-width: 400px; margin: 100px auto; padding: 20px; text-align: center; text-shadow: 0 0 2px rgba(255, 176, 0, 0.4); text-transform: uppercase; }
+                    .card { border: 1px solid var(--term-fg); padding: 30px; background: var(--term-bg); box-shadow: inset 0 0 10px rgba(255, 176, 0, 0.05); }
+                    input, button { background: var(--term-bg); border: 1px solid var(--term-dim); color: var(--term-fg); padding: 12px; font-family: inherit; font-size: 1rem; margin-bottom: 20px; width: 100%; box-sizing: border-box; text-transform: uppercase; }
+                    input:focus { outline: none; border-color: var(--term-fg); box-shadow: 0 0 5px rgba(255, 176, 0, 0.3); }
+                    button { cursor: pointer; font-weight: bold; background: var(--term-fg); color: var(--term-bg); border-color: var(--term-fg); transition: 0.1s; }
+                    button:hover { background: var(--term-dim); border-color: var(--term-dim); }
+                    .term-dim { color: var(--term-dim); margin-bottom: 20px;}
                 </style>
             </head>
             <body>
                 <div class="card">
                     <h2>:: COMSTAR UPLINK ::</h2>
-                    <p>Identify yourself to access the Mercenary Board.</p>
+                    <p class="term-dim">IDENTIFY YOURSELF TO ACCESS THE MERCENARY BOARD.</p>
                     <form method="POST" action="/login">
-                        <input type="text" name="username" placeholder="Enter Callsign" required>
+                        <input type="text" name="username" placeholder="ENTER CALLSIGN" required>
                         <button type="submit">ESTABLISH UPLINK</button>
                     </form>
                 </div>
@@ -624,28 +834,38 @@ async fn get_board(jar: CookieJar, State(state): State<AppState>) -> Html<String
 }
 
 async fn login(jar: CookieJar, Form(input): Form<LoginForm>) -> (CookieJar, Html<String>) {
-    let updated_jar = jar.add(Cookie::new("username", input.username));
+    let cookie = Cookie::build(("username", input.username))
+        .path("/")
+        .build();
+
+    let updated_jar = jar.add(cookie);
     let response = Html(r##"<script>window.location.href = "/";</script>"##.to_string());
+
     (updated_jar, response)
 }
 
 async fn get_ruleset_options(Query(query): Query<RulesetQuery>) -> Html<String> {
     let html = if query.ruleset.contains("Total Warfare") {
         r##"
-        <label><input type="checkbox" name="rule_floating_crits"> Floating Criticals</label>
-        <label><input type="checkbox" name="rule_forced_withdrawal"> Forced Withdrawal</label>
-        <label><input type="checkbox" name="rule_backward_level_change"> Backwards Level Change</label>
-        <label><input type="checkbox" name="rule_initiative_die"> Initiative Die</label>
-        <label><input type="checkbox" name="rule_careful_stand"> Careful Stand</label>
-        <label><input type="checkbox" name="rule_sprinting"> Sprinting</label>
-        <label><input type="checkbox" name="rule_expanded_arm_flipping"> Expanded Arm Flippping</label>
-        <label><input type="checkbox" name="rule_front-loaded_deployment"> Front-Loaded Deployment</label>
+        <label><input type="checkbox" name="rule_floating_crits"> FLOATING CRITICALS</label>
+        <label><input type="checkbox" name="rule_forced_withdrawal"> FORCED WITHDRAWAL</label>
+        <label><input type="checkbox" name="rule_backward_level_change"> BACKWARDS LEVEL CHANGE</label>
+        <label><input type="checkbox" name="rule_initiative_die"> INITIATIVE DIE</label>
+        <label><input type="checkbox" name="rule_careful_stand"> CAREFUL STAND</label>
+        <label><input type="checkbox" name="rule_sprinting"> SPRINTING</label>
+        <label><input type="checkbox" name="rule_expanded_arm_flipping"> EXPANDED ARM FLIPPING</label>
+        <label><input type="checkbox" name="rule_front-loaded_deployment"> FRONT-LOADED DEPLOYMENT</label>
         "##
     } else if query.ruleset.contains("Core Rules (2026)") {
         r##"
-        <label><input type="checkbox" name="rule_battlefield_support_assets"> Battlefield Support Assets</label>
-        <label><input type="checkbox" name="rule_battlefield_support_strikes"> Battlefield Support Strikes</label>
-        <label><input type="checkbox" name="rule_initiative_die"> Initiative Die</label>
+        <label><input type="checkbox" name="rule_battlefield_support_assets" onchange="toggleBsp()"> BATTLEFIELD SUPPORT ASSETS</label>
+        <label><input type="checkbox" name="rule_battlefield_support_strikes" onchange="toggleBsp()"> BATTLEFIELD SUPPORT STRIKES</label>
+        <label><input type="checkbox" name="rule_initiative_die"> INITIATIVE DIE</label>
+        "##
+    } else if query.ruleset.contains("Alpha Strike") {
+        r##"
+        <label><input type="checkbox" name="rule_multiple_attack_rolls"> MULTIPLE ATTACK ROLLS</label>
+        <label><input type="checkbox" name="rule_variable_damage"> VARIABLE DAMAGE</label>
         "##
     } else {
         r##"
@@ -693,7 +913,11 @@ async fn create_contract(
         challenger_force: None,
         challenger_assets: None,
         mission_type: input.get("mission_type").cloned().unwrap_or_default(),
+
         bv2: input.get("bv2").cloned().unwrap_or_default(),
+        pv: input.get("pv").cloned().unwrap_or_default(),
+        bsp: input.get("bsp").cloned().unwrap_or_default(),
+
         era: input.get("era").cloned().unwrap_or_default(),
         map: input.get("map").cloned().unwrap_or_default(),
         intel_level: input.get("intel_level").cloned().unwrap_or_default(),
@@ -757,7 +981,6 @@ async fn withdraw_contract(
     let raw_bytes = state.db.get(id.to_be_bytes()).unwrap().unwrap();
     let mut contract: Contract = serde_json::from_slice(&raw_bytes).unwrap();
 
-    // Only allow the active challenger to withdraw themselves
     if contract.challenger.as_deref() == Some(current_user.as_str()) {
         contract.status = "Open".to_string();
         contract.challenger = None;
@@ -785,7 +1008,6 @@ async fn transfer_contract(
     let raw_bytes = state.db.get(id.to_be_bytes()).unwrap().unwrap();
     let mut contract: Contract = serde_json::from_slice(&raw_bytes).unwrap();
 
-    // Only the host can hand over command, and only if a challenger exists
     if contract.host == current_user && contract.challenger.is_some() {
         contract.host = contract.challenger.take().unwrap();
         contract.host_force = contract.challenger_force.take().unwrap_or_default();
