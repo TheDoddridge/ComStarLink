@@ -84,6 +84,16 @@ struct CommentForm {
 
 // --- HELPER FUNCTIONS ---
 
+// Prevents Cross-Site Scripting (XSS) if friends type HTML into inputs
+fn escape_html(input: &str) -> String {
+    input
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#x27;")
+}
+
 fn format_force(force_string: &str, intel_level: &str, is_owner: bool) -> String {
     if force_string.is_empty() {
         return "<span class='term-dim'>[ NONE SPECIFIED ]</span>".to_string();
@@ -108,7 +118,7 @@ fn format_force(force_string: &str, intel_level: &str, is_owner: bool) -> String
 
             let mut summary = Vec::new();
             for (class, count) in counts {
-                summary.push(format!("{}x {}", count, class));
+                summary.push(format!("{}x {}", count, escape_html(&class)));
             }
             summary.sort();
 
@@ -123,7 +133,8 @@ fn format_force(force_string: &str, intel_level: &str, is_owner: bool) -> String
     }
 
     // Full Sweep OR Current User is the Owner
-    let mut formatted = force_string.replace(",", "<br>• ");
+    let escaped_force = escape_html(force_string);
+    let mut formatted = escaped_force.replace(",", "<br>• ");
 
     if is_owner && (intel_level.contains("Blackout") || intel_level.contains("Intercept")) {
         formatted = format!(
@@ -171,9 +182,9 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
     let host_assets_display = if c.host_assets.is_empty() {
         "NONE".to_string()
     } else {
-        c.host_assets.clone()
+        escape_html(&c.host_assets)
     };
-    let display_time_fallback = c.match_time.replace("T", " ");
+    let display_time_fallback = escape_html(&c.match_time).replace("T", " ");
 
     // Dynamic Display for BV / PV / BSP
     let mut points_display = String::new();
@@ -181,20 +192,20 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         let pv_val = if c.pv.is_empty() {
             "OPEN".to_string()
         } else {
-            c.pv.clone()
+            escape_html(&c.pv)
         };
         points_display.push_str(&format!(r#"<div><span class="term-label">TARGET PV:</span> <span class="term-data">{}</span></div>"#, pv_val));
     } else {
         let bv_val = if c.bv2.is_empty() {
             "OPEN".to_string()
         } else {
-            c.bv2.clone()
+            escape_html(&c.bv2)
         };
         points_display.push_str(&format!(r#"<div><span class="term-label">TARGET BV:</span> <span class="term-data">{}</span></div>"#, bv_val));
     }
 
     if !c.bsp.is_empty() {
-        points_display.push_str(&format!(r#"<div><span class="term-label">TARGET BSP:</span> <span class="term-data">{}</span></div>"#, c.bsp));
+        points_display.push_str(&format!(r#"<div><span class="term-label">TARGET BSP:</span> <span class="term-data">{}</span></div>"#, escape_html(&c.bsp)));
     }
 
     // 1. Action Area (Accept / Transfer / Withdraw logic)
@@ -252,7 +263,10 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         let challenger_assets_display = if challenger_assets.is_empty() {
             "NONE".to_string()
         } else {
-            format!("<span class='term-data'>{}</span>", challenger_assets)
+            format!(
+                "<span class='term-data'>{}</span>",
+                escape_html(challenger_assets)
+            )
         };
 
         let challenger_info = format!(
@@ -261,7 +275,7 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
                 <div style="margin-bottom: 15px;">• {force}</div>
                 <div><span class="term-label">ASSETS:</span> {assets}</div>
             </div>"##,
-            challenger = c.challenger.as_deref().unwrap_or("UNKNOWN"),
+            challenger = escape_html(c.challenger.as_deref().unwrap_or("UNKNOWN")),
             force = challenger_force_display,
             assets = challenger_assets_display,
         );
@@ -290,8 +304,8 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
                 <strong class="term-name">{prefix} {author}:</strong><br> <span class="term-data">{text}</span>
             </div>"##,
             prefix = prefix,
-            author = comment.author,
-            text = comment.text
+            author = escape_html(&comment.author),
+            text = escape_html(&comment.text)
         ));
     }
 
@@ -318,13 +332,13 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
     } else {
         format!(
             "<span class='term-data'>{}</span>",
-            c.optional_rules.join(", ")
+            escape_html(&c.optional_rules.join(", "))
         )
     };
     let cancel_button = if is_host {
         format!(
-            r##"<button hx-delete="/contract/{id}" hx-confirm="SCRUB MISSION? THIS CANNOT BE UNDONE." hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-alert" style="margin-top: 20px; width: 100%;">
-                SCRUB MISSION (CANCEL CONTRACT)
+            r##"<button hx-delete="/contract/{id}" hx-confirm="SCRUB CONTRACT? THIS CANNOT BE UNDONE." hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-alert" style="margin-top: 20px; width: 100%;">
+                SCRUB CONTRACT
             </button>"##,
             id = c.id
         )
@@ -365,15 +379,15 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
             {cancel_button}
         </div>"##,
         id = c.id,
-        host = c.host,
+        host = escape_html(&c.host),
         match_time = c.match_time,
         display_time_fallback = display_time_fallback,
-        mission_type = c.mission_type,
+        mission_type = escape_html(&c.mission_type),
         points_display = points_display,
-        force_comp = c.force_comp,
-        era = c.era,
-        intel_level = c.intel_level,
-        ruleset = c.ruleset,
+        force_comp = escape_html(&c.force_comp),
+        era = escape_html(&c.era),
+        intel_level = escape_html(&c.intel_level),
+        ruleset = escape_html(&c.ruleset),
         optional_rules_html = optional_rules_html,
         host_force_display = host_force_display,
         host_assets = host_assets_display,
@@ -486,7 +500,7 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
             /* Invert the black calendar icon to an off-white matching var(--term-data) */
             input[type="datetime-local"]::-webkit-calendar-picker-indicator {{
                 cursor: pointer;
-                filter: invert(85%) sepia(10%) saturate(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+                filter: invert(90%) sepia(10%) saturate(0%) hue-rotate(180deg) brightness(150%) grayscale(1);
             }}
 
             /* Standardized Hollow Buttons that fill on hover */
@@ -578,7 +592,7 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                             <option value="Skirmish">Skirmish</option>
                             <option value="Breakthrough">Breakthrough</option>
                             <option value="Base Assault">Base Assault</option>
-                            <option value="Reconnaisance">Reconnaisance</option>
+                            <option value="Reconnaissance">Reconnaissance</option>
                             <option value="Campaign Scenario">Campaign Scenario</option>
                         </select>
                     </div>
@@ -593,7 +607,7 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     <div class="panel panel-host" style="grid-column: span 2;">
                         <label class="term-label">HOST FORCE ROSTER:</label>
                         <div style="display:flex; gap:10px; margin-top:10px;">
-                            <input type="text" id="host-unit-search" list="unit-datalist" placeholder="Search Unit (e.g. Atlas AS7-D)..." style="margin-bottom:0;">
+                            <input type="text" id="host-unit-search" list="unit-datalist" placeholder="Search Unit (e.g. Atlas, Vehicle)..." style="margin-bottom:0;">
                             <button type="button" onclick="addUnit('host')" style="margin-bottom:0; width:auto;" class="btn-outline">ADD TO ROSTER</button>
                         </div>
                         <ul id="host-roster-list" class="roster-list"></ul>
@@ -620,16 +634,18 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     <div>
                         <label class="term-label">INTEL LEVEL:</label>
                         <select name="intel_level" style="color: var(--term-data);">
-                            <option value="Full Sweep (Revealed)">Full Sweep (Revealed)</option>
+                            <option value="Full Sweep">Full Sweep (Revealed)</option>
                             <option value="Partial Intercept">Partial Intercept</option>
-                            <option value="Total Blackout (Blind)">Total Blackout (Blind)</option>
+                            <option value="Total Blackout">Total Blackout (Blind)</option>
                         </select>
                     </div>
                 </div>
 
                 <div id="optional-rules" class="checkbox-group">
-                    <label><input type="checkbox" name="rule_Battlefield_Support_Assets" onchange="toggleBsp()"> Battlefield Support Assets</label>
-                    <label><input type="checkbox" name="rule_Battlefield_Support_Strikes" onchange="toggleBsp()"> Battlefield Support Strikes</label>
+        <label><input type="checkbox" name="rule_Battlefield_Support_Assets" onchange="toggleBsp()"> Battlefield Support Assets</label>
+        <label><input type="checkbox" name="rule_Battlefield_Support_Strikes" onchange="toggleBsp()"> Battlefield Support Strikes</label>
+        <label><input type="checkbox" name="rule_Initiative_Die"> Initiative Die</label>
+
                 </div>
 
                 <button type="submit" class="btn-primary" style="width: 100%;">TRANSMIT CONTRACT</button>
@@ -639,7 +655,7 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
         <h3 class="term-label">:: OPEN BOUNTIES ::</h3>
         <div id="board">
     "##,
-        current_user = current_user,
+        current_user = escape_html(current_user),
         unit_datalist = units::UNIT_DATALIST_HTML
     );
 
@@ -757,8 +773,12 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     const d = new Date(el.dataset.time);
                     if (!isNaN(d)) {
                         el.innerText = d.toLocaleString(undefined, { 
-                            weekday: 'short', month: 'short', day: 'numeric', 
-                            hour: '2-digit', minute: '2-digit' 
+                            weekday: 'short', 
+                            month: 'short', 
+                            day: 'numeric', 
+                            hour: '2-digit', 
+                            minute: '2-digit',
+                            hour12: false // Forces 24-hour tactical time
                         }).toUpperCase();
                     }
                     el.classList.add('initialized');
@@ -827,7 +847,7 @@ async fn get_board(jar: CookieJar, State(state): State<AppState>) -> Html<String
                     input, button { background: transparent; border: 1px solid var(--term-border); color: var(--term-data); padding: 12px; font-family: inherit; font-size: 1rem; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
                     input:focus { outline: none; border-color: var(--term-label); box-shadow: 0 0 5px rgba(88, 166, 255, 0.2); }
                     
-                    button { cursor: pointer; font-weight: bold; color: var(--term-label); border-color: var(--term-label); transition: 0.1s; text-transform: uppercase; }
+                    button { cursor: pointer; font-weight: bold; color: var(--term-label); border-color: var(--term-label); transition: 0.1s; text-transform: uppercase; background: transparent; }
                     button:hover { background: var(--term-label); color: var(--term-bg); }
                     
                     .term-label { color: var(--term-label); text-transform: uppercase; margin-top: 0; letter-spacing: 1px;}
@@ -875,12 +895,14 @@ async fn get_ruleset_options(Query(query): Query<RulesetQuery>) -> Html<String> 
         r##"
         <label><input type="checkbox" name="rule_Floating_Crits"> Floating Criticals</label>
         <label><input type="checkbox" name="rule_Forced_Withdrawal"> Forced Withdrawal</label>
+        <label><input type="checkbox" name="rule_Special_Pilot_Abilities"> Special Pilot Abilities</label>
         <label><input type="checkbox" name="rule_Backward_Level_Change"> Backwards Level Change</label>
         <label><input type="checkbox" name="rule_Initiative_Die"> Initiative Die</label>
         <label><input type="checkbox" name="rule_Careful_Stand"> Careful Stand</label>
         <label><input type="checkbox" name="rule_Sprinting"> Sprinting</label>
         <label><input type="checkbox" name="rule_Expanded_Arm_Flipping"> Expanded Arm Flipping</label>
         <label><input type="checkbox" name="rule_Front-Loaded_Deployment"> Front-Loaded Deployment</label>
+        <label><input type="checkbox" name="rule_Hidden_Units"> Hidden Units</label>
         "##
     } else if query.ruleset.contains("Core Rules (2026)") {
         r##"
@@ -892,6 +914,16 @@ async fn get_ruleset_options(Query(query): Query<RulesetQuery>) -> Html<String> 
         r##"
         <label><input type="checkbox" name="rule_Multiple_Attack_Rolls"> Multiple Attack Rolls</label>
         <label><input type="checkbox" name="rule_Variable_Damage"> Variable Damage</label>
+        <label><input type="checkbox" name="rule_Formations"> Formation Rules</label>
+        <label><input type="checkbox" name="rule_Special_Pilot_Abilities"> Special Pilot Abilities</label>
+        <label><input type="checkbox" name="rule_Special_Command_Abilities"> Special Command Abilities</label>
+        <label><input type="checkbox" name="rule_Battlefield_Support" onchange="toggleBsp()"> Battlefield Support</label>
+        <label><input type="checkbox" name="rule_Hidden_Units"> Hidden Units</label>
+        "##
+    } else if query.ruleset.contains("Introductory") {
+        r##"
+        <label><input type="checkbox" name="rule_Forced_Withdrawal"> Forced Withdrawal</label>
+        <label><input type="checkbox" name="rule_Floating_Crits"> Floating Criticals</label>
         "##
     } else {
         r##"
@@ -899,7 +931,6 @@ async fn get_ruleset_options(Query(query): Query<RulesetQuery>) -> Html<String> 
     };
     Html(html.to_string())
 }
-
 async fn create_contract(
     jar: CookieJar,
     State(state): State<AppState>,
