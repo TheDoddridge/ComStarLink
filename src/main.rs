@@ -113,10 +113,10 @@ fn format_force(force_string: &str, intel_level: &str, is_owner: bool) -> String
             summary.sort();
 
             if summary.is_empty() {
-                return "<span class='term-dim'>[ ENCRYPTED / UNKNOWN ]</span>".to_string();
+                return "<span class='term-warn'>[ ENCRYPTED / UNKNOWN ]</span>".to_string();
             }
             return format!(
-                "<span class='term-dim'>[ PARTIAL INTERCEPT: {} ]</span>",
+                "<span class='term-warn'>[ PARTIAL INTERCEPT: {} ]</span>",
                 summary.join(", ")
             );
         }
@@ -127,9 +127,11 @@ fn format_force(force_string: &str, intel_level: &str, is_owner: bool) -> String
 
     if is_owner && (intel_level.contains("Blackout") || intel_level.contains("Intercept")) {
         formatted = format!(
-            "{} <br><span class='term-dim' style='margin-top: 10px; display: inline-block;'><em>(Visible only to you - Intel level hides this from others)</em></span>", 
+            "<span class='term-data'>{}</span> <br><span class='term-dim' style='margin-top: 10px; display: inline-block;'><em>(Visible only to you - Intel level hides this from others)</em></span>", 
             formatted
         );
+    } else {
+        formatted = format!("<span class='term-data'>{}</span>", formatted);
     }
 
     formatted
@@ -181,27 +183,18 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         } else {
             c.pv.clone()
         };
-        points_display.push_str(&format!(
-            r#"<div><span class="term-label">TARGET PV:</span> {}</div>"#,
-            pv_val
-        ));
+        points_display.push_str(&format!(r#"<div><span class="term-label">TARGET PV:</span> <span class="term-data">{}</span></div>"#, pv_val));
     } else {
         let bv_val = if c.bv2.is_empty() {
             "OPEN".to_string()
         } else {
             c.bv2.clone()
         };
-        points_display.push_str(&format!(
-            r#"<div><span class="term-label">TARGET BV:</span> {}</div>"#,
-            bv_val
-        ));
+        points_display.push_str(&format!(r#"<div><span class="term-label">TARGET BV:</span> <span class="term-data">{}</span></div>"#, bv_val));
     }
 
     if !c.bsp.is_empty() {
-        points_display.push_str(&format!(
-            r#"<div><span class="term-label">TARGET BSP:</span> {}</div>"#,
-            c.bsp
-        ));
+        points_display.push_str(&format!(r#"<div><span class="term-label">TARGET BSP:</span> <span class="term-data">{}</span></div>"#, c.bsp));
     }
 
     // 1. Action Area (Accept / Transfer / Withdraw logic)
@@ -214,21 +207,21 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         } else {
             format!(
                 r##"<form hx-post="/contract/{id}/accept" hx-target="#contract-{id}" hx-swap="outerHTML" class="panel-divider">
-                    <strong>:: ACCEPT CONTRACT ::</strong>
+                    <strong class="term-label">:: ACCEPT CONTRACT ::</strong>
                     
-                    <div class="panel" style="margin-top: 15px;">
+                    <div class="panel panel-challenger" style="margin-top: 15px;">
                         <label class="term-label">CHALLENGER FORCE ROSTER:</label>
                         <div style="display:flex; gap:10px; margin-top:5px;">
-                            <input type="text" id="challenger-unit-search-{id}" list="unit-datalist" placeholder="SEARCH UNIT..." style="margin-bottom:0;">
-                            <button type="button" onclick="addUnit('challenger', '{id}')" style="margin-bottom:0; width:auto;" class="btn-outline">ADD</button>
+                            <input type="text" id="challenger-unit-search-{id}" list="unit-datalist" placeholder="Search Unit..." style="margin-bottom:0;">
+                            <button type="button" onclick="addUnit('challenger', '{id}')" style="margin-bottom:0; width:auto;" class="btn-challenger">ADD</button>
                         </div>
                         <ul id="challenger-roster-list-{id}" class="roster-list"></ul>
                         <input type="hidden" name="challenger_force" id="challenger_force_input_{id}" value="">
                         
                         <label class="term-label" style="margin-top: 15px; display: block;">ASSETS (OPTIONAL):</label>
-                        <input type="text" name="challenger_assets" placeholder="E.G. TOKENS, MAPS" style="margin-top: 5px;">
+                        <input type="text" name="challenger_assets" placeholder="e.g. Tokens, Maps" style="margin-top: 5px;">
                     </div>
-                    <button type="submit" class="btn-solid" style="width: 100%;">LOCK MATCH</button>
+                    <button type="submit" class="btn-challenger" style="width: 100%;">LOCK MATCH</button>
                 </form>"##,
                 id = c.id
             )
@@ -238,7 +231,7 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
 
         if is_host {
             action_buttons.push_str(&format!(
-                r##"<button hx-post="/contract/{id}/transfer" hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-outline" style="width: auto; margin-bottom: 0; padding: 5px 10px;">
+                r##"<button hx-post="/contract/{id}/transfer" hx-target="#contract-{id}" hx-swap="outerHTML" class="btn-primary" style="width: auto; margin-bottom: 0; padding: 5px 10px;">
                     TRANSFER COMMAND TO CHALLENGER
                 </button>"##, id = c.id
             ));
@@ -257,14 +250,14 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         );
         let challenger_assets = c.challenger_assets.as_deref().unwrap_or("").trim();
         let challenger_assets_display = if challenger_assets.is_empty() {
-            "NONE"
+            "NONE".to_string()
         } else {
-            challenger_assets
+            format!("<span class='term-data'>{}</span>", challenger_assets)
         };
 
         let challenger_info = format!(
-            r##"<div class="panel">
-                <div style="margin-bottom: 10px;"><strong class="term-label">:: CHALLENGER IDENTIFIED ::</strong> {challenger}</div>
+            r##"<div class="panel panel-challenger">
+                <div style="margin-bottom: 10px;"><strong class="term-label">:: CHALLENGER IDENTIFIED ::</strong> <span class="term-name">{challenger}</span></div>
                 <div style="margin-bottom: 15px;">• {force}</div>
                 <div><span class="term-label">ASSETS:</span> {assets}</div>
             </div>"##,
@@ -276,7 +269,7 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
         format!(
             r##"<div class="panel-divider">
                 <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 15px;">
-                    <strong>[ MATCH LOCKED - AWAITING DEPLOYMENT ]</strong>
+                    <strong class="term-alert">[ MATCH LOCKED - AWAITING DEPLOYMENT ]</strong>
                     {action_buttons}
                 </div>
                 {challenger_info}
@@ -294,7 +287,7 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
 
         comments_html.push_str(&format!(
             r##"<div style="margin-top: 10px;">
-                <strong class="term-dim">{prefix} {author}:</strong><br> {text}
+                <strong class="term-name">{prefix} {author}:</strong><br> <span class="term-data">{text}</span>
             </div>"##,
             prefix = prefix,
             author = comment.author,
@@ -308,11 +301,11 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
 
     let comments_section = format!(
         r##"<div class="panel" style="margin-top: 20px;">
-            <strong>:: COMMS CHANNEL ::</strong>
+            <strong class="term-label">:: COMMS CHANNEL ::</strong>
             <div style="margin: 15px 0; max-height: 200px; overflow-y: auto;">{comments_html}</div>
             <form hx-post="/contract/{id}/comment" hx-target="#contract-{id}" hx-swap="outerHTML" style="display: flex; gap: 10px; margin-bottom: 0;">
-                <input type="text" name="text" placeholder="TRANSMIT MESSAGE..." required style="margin-bottom: 0;">
-                <button type="submit" class="btn-solid" style="margin-bottom: 0; width: auto; padding: 0 20px;">SEND</button>
+                <input type="text" name="text" placeholder="Transmit message..." required style="margin-bottom: 0; text-transform: none;">
+                <button type="submit" class="btn-primary" style="margin-bottom: 0; width: auto; padding: 0 20px;">SEND</button>
             </form>
         </div>"##,
         id = c.id,
@@ -323,7 +316,10 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
     let optional_rules_html = if c.optional_rules.is_empty() {
         "NONE".to_string()
     } else {
-        c.optional_rules.join(", ")
+        format!(
+            "<span class='term-data'>{}</span>",
+            c.optional_rules.join(", ")
+        )
     };
     let cancel_button = if is_host {
         format!(
@@ -339,28 +335,28 @@ fn render_contract(c: &Contract, current_user: &str) -> String {
     format!(
         r##"<div class="card" id="contract-{id}">
             <div class="card-header">
-                <span><strong>CONTRACT #{id}</strong> // HOST: {host}</span>
-                <span>
+                <span><strong>CONTRACT #{id}</strong> // HOST: <span class="term-name">{host}</span></span>
+                <span class="term-timer">
                     [ <span class="exact-time" data-time="{match_time}">{display_time_fallback}</span> | 
                     <span class="countdown" data-time="{match_time}">CALCULATING...</span> ]
                 </span>
             </div>
             
             <div class="form-grid">
-                <div class="panel">
-                    <div><span class="term-label">MISSION:</span> {mission_type}</div>
+                <div class="panel panel-info">
+                    <div><span class="term-label">MISSION:</span> <span class="term-data">{mission_type}</span></div>
                     {points_display}
-                    <div><span class="term-label">FORCE COMP:</span> {force_comp}</div>
-                    <div><span class="term-label">ERA:</span> {era}</div>
-                    <div><span class="term-label">INTEL:</span> {intel_level}</div>
-                    <div style="margin-top: 10px;"><span class="term-label">RULESET:</span> {ruleset}</div>
+                    <div><span class="term-label">FORCE COMP:</span> <span class="term-data">{force_comp}</span></div>
+                    <div><span class="term-label">ERA:</span> <span class="term-data">{era}</span></div>
+                    <div><span class="term-label">INTEL:</span> <span class="term-data">{intel_level}</span></div>
+                    <div style="margin-top: 10px;"><span class="term-label">RULESET:</span> <span class="term-data">{ruleset}</span></div>
                     <div><span class="term-label">OPT RULES:</span> {optional_rules_html}</div>
                 </div>
 
-                <div class="panel">
+                <div class="panel panel-host">
                     <div style="margin-bottom: 10px;"><strong class="term-label">:: HOST FORCE DEPLOYMENT ::</strong></div>
                     <div style="margin-bottom: 15px;">• {host_force_display}</div>
-                    <div><span class="term-label">ASSETS:</span> {host_assets}</div>
+                    <div><span class="term-label">ASSETS:</span> <span class="term-data">{host_assets}</span></div>
                 </div>
             </div>
             
@@ -403,96 +399,116 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
         <script src="https://unpkg.com/htmx.org@1.9.10"></script>
         <style>
             :root {{
-                --term-bg: #050505;
-                --term-fg: #ffb000;
-                --term-dim: #a67300;
-                --term-alert: #ff3333;
-                --term-panel: #0a0a0a;
+                --term-bg: #0d1117;        /* Deep Space Black/Blue */
+                --term-panel: #161b22;     /* Slightly lighter panel background */
+                --term-border: #30363d;    /* Subdued structural borders */
+                --term-label: #58a6ff;     /* Bright Cyan for field names */
+                --term-data: #c9d1d9;      /* Crisp Off-White for field contents */
+                --term-name: #e3b341;      /* Gold for all User Names */
+                --term-accent: #3fb950;    /* Phosphor Green for accents/host */
+                --term-alert: #ff7b72;     /* Red for warnings/deletions */
+                --term-warn: #d29922;      /* Orange/Yellow for general alerts */
+                --term-dim: #8b949e;       /* Grey for secondary text */
+                --term-purple: #bc8cff;    /* Purple for Challenger specifics */
+                --term-timer: #ff79c6;     /* Retro Magenta for exact times/countdowns */
             }}
 
             body {{ 
                 background-color: var(--term-bg); 
-                color: var(--term-fg); 
+                color: var(--term-data); 
                 font-family: 'Courier New', Courier, monospace; 
                 font-size: 16px;
                 max-width: 900px; 
                 margin: 0 auto; 
                 padding: 20px; 
-                text-shadow: 0 0 2px rgba(255, 176, 0, 0.4);
+                text-shadow: 0 0 1px rgba(201, 209, 217, 0.2);
                 line-height: 1.4;
             }}
 
-            h2, h3 {{ margin-top: 0; text-transform: uppercase; font-weight: bold; letter-spacing: 1px; }}
+            h2, h3 {{ margin-top: 0; color: var(--term-label); text-transform: uppercase; font-weight: bold; letter-spacing: 1px; }}
             
-            .term-label {{ color: var(--term-dim); font-weight: bold; margin-right: 5px; text-transform: uppercase; }}
+            /* Semantic Color Classes */
+            .term-label {{ color: var(--term-label); text-transform: uppercase; font-weight: bold; margin-right: 5px; }}
+            .term-data {{ color: var(--term-data); }}
+            .term-name {{ color: var(--term-name); font-weight: bold; text-shadow: 0 0 3px rgba(227, 179, 65, 0.3); }}
+            .term-alert {{ color: var(--term-alert); font-weight: bold; }}
+            .term-warn {{ color: var(--term-warn); font-weight: bold; }}
             .term-dim {{ color: var(--term-dim); }}
-            .term-alert {{ color: var(--term-alert); text-shadow: 0 0 4px rgba(255, 51, 51, 0.6); }}
+            .term-timer {{ color: var(--term-timer); font-weight: bold; text-shadow: 0 0 3px rgba(255, 121, 198, 0.4); }}
 
+            /* Structural Elements */
             .card {{ 
-                border: 1px solid var(--term-fg); 
+                border: 1px solid var(--term-border); 
                 padding: 20px; 
                 margin-bottom: 30px; 
                 background: var(--term-bg); 
-                box-shadow: inset 0 0 10px rgba(255, 176, 0, 0.05);
             }}
 
             .card-header {{
                 display: flex; 
                 justify-content: space-between; 
-                border-bottom: 1px dashed var(--term-dim); 
+                border-bottom: 1px dashed var(--term-border); 
                 margin-bottom: 20px; 
                 padding-bottom: 10px;
-                text-transform: uppercase;
             }}
 
             .panel {{ 
                 padding: 15px; 
                 background: var(--term-panel); 
-                border: 1px dashed var(--term-dim); 
+                border: 1px dashed var(--term-border); 
             }}
+            .panel-info {{ border-left: 3px solid var(--term-label); }}
+            .panel-host {{ border-left: 3px solid var(--term-accent); }}
+            .panel-challenger {{ border-left: 3px solid var(--term-purple); }}
             
             .panel-divider {{
                 margin-top: 20px; 
                 padding-top: 20px; 
-                border-top: 1px dashed var(--term-dim);
+                border-top: 1px dashed var(--term-border);
             }}
 
+            /* Forms & Inputs */
             input, select, button {{ 
                 background: var(--term-bg); 
-                border: 1px solid var(--term-dim); 
-                color: var(--term-fg); 
+                border: 1px solid var(--term-border); 
+                color: var(--term-data); 
                 padding: 10px; 
                 font-family: inherit; 
                 font-size: 1rem;
                 margin-bottom: 15px; 
                 width: 100%; 
                 box-sizing: border-box; 
-                text-transform: uppercase;
             }}
             
-            input:focus, select:focus {{ outline: none; border-color: var(--term-fg); box-shadow: 0 0 5px rgba(255, 176, 0, 0.3); }}
+            input::placeholder {{ color: var(--term-dim); }}
+            input:focus, select:focus {{ outline: none; border-color: var(--term-label); box-shadow: 0 0 5px rgba(88, 166, 255, 0.2); }}
 
+            /* Invert the black calendar icon to an off-white matching var(--term-data) */
             input[type="datetime-local"]::-webkit-calendar-picker-indicator {{
                 cursor: pointer;
-                filter: invert(65%) sepia(85%) saturate(1450%) hue-rotate(1deg) brightness(105%) contrast(105%);
+                filter: invert(85%) sepia(10%) saturate(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
             }}
 
-            button {{ cursor: pointer; font-weight: bold; transition: background-color 0.1s; text-transform: uppercase; }}
-            button:hover {{ background: var(--term-dim); color: var(--term-bg); }}
+            /* Standardized Hollow Buttons that fill on hover */
+            button {{ cursor: pointer; font-weight: bold; transition: background-color 0.1s, color 0.1s; text-transform: uppercase; background: transparent; }}
             
-            .btn-solid {{ background: var(--term-fg); color: var(--term-bg); border-color: var(--term-fg); }}
-            .btn-solid:hover {{ background: var(--term-dim); border-color: var(--term-dim); color: var(--term-bg); }}
+            .btn-primary {{ color: var(--term-label); border-color: var(--term-label); }}
+            .btn-primary:hover {{ background: var(--term-label); color: var(--term-bg); }}
             
-            .btn-outline {{ background: transparent; color: var(--term-fg); border-color: var(--term-fg); }}
-            .btn-outline:hover {{ background: var(--term-fg); color: var(--term-bg); }}
+            .btn-outline {{ color: var(--term-accent); border-color: var(--term-accent); }}
+            .btn-outline:hover {{ background: var(--term-accent); color: var(--term-bg); }}
+            
+            .btn-challenger {{ color: var(--term-purple); border-color: var(--term-purple); }}
+            .btn-challenger:hover {{ background: var(--term-purple); color: var(--term-bg); }}
 
-            .btn-alert {{ background: transparent; color: var(--term-alert); border-color: var(--term-alert); }}
+            .btn-alert {{ color: var(--term-alert); border-color: var(--term-alert); }}
             .btn-alert:hover {{ background: var(--term-alert); color: var(--term-bg); }}
 
+            /* Grid Layouts */
             .form-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }}
             
-            .checkbox-group {{ margin: 15px 0; border: 1px dashed var(--term-dim); padding: 15px; background: var(--term-panel); }}
-            .checkbox-group label {{ display: flex; align-items: center; cursor: pointer; margin-bottom: 10px; text-transform: uppercase; }}
+            .checkbox-group {{ margin: 15px 0; border: 1px dashed var(--term-border); padding: 15px; background: var(--term-panel); }}
+            .checkbox-group label {{ display: flex; align-items: center; cursor: pointer; margin-bottom: 10px; color: var(--term-data); }}
             .checkbox-group input {{ width: auto; margin-right: 15px; margin-bottom: 0; }}
             .checkbox-group label:last-child {{ margin-bottom: 0; }}
 
@@ -500,84 +516,84 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                 display: flex; 
                 justify-content: space-between; 
                 align-items: center; 
-                border-bottom: 2px solid var(--term-fg); 
+                border-bottom: 2px solid var(--term-label); 
                 margin-bottom: 30px; 
                 padding-bottom: 10px; 
-                text-transform: uppercase;
             }}
 
+            /* Rosters */
             .roster-list {{ list-style: none; padding: 0; margin: 10px 0; }}
-            .roster-list li {{ border-left: 2px solid var(--term-fg); padding-left: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; background: var(--term-panel); padding: 8px; }}
+            .roster-list li {{ border-left: 2px solid var(--term-accent); padding-left: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; background: var(--term-panel); padding: 8px; color: var(--term-data); }}
             .roster-list li button {{ width: auto; margin: 0; padding: 4px 10px; }}
         </style>
     </head>
     <body>
         <div class="top-bar">
             <h2>:: MERCENARY REVIEW BOARD ::</h2>
-            <span>LOGGED IN AS: <strong>{current_user}</strong></span>
+            <span>LOGGED IN AS: <strong class="term-name">{current_user}</strong></span>
         </div>
         
         <datalist id="unit-datalist">
             {unit_datalist}
         </datalist>
 
-        <div class="card">
+        <div class="card" style="border-top: 3px solid var(--term-label);">
             <h3>:: INITIALIZE NEW CONTRACT ::</h3>
             <form hx-post="/contract" hx-target="#board" hx-swap="afterbegin">
                 <div class="form-grid">
                     <div>
                         <label class="term-label">DATE & TIME:</label>
-                        <input type="datetime-local" name="match_time" required>
+                        <input type="datetime-local" name="match_time" required style="color: var(--term-data);">
                         <input type="hidden" name="match_epoch" id="match_epoch_input" value="">
                     </div>
                     
                     <div>
                         <label class="term-label">RULESET:</label>
-                        <select name="ruleset" hx-get="/ui/ruleset-options" hx-target="#optional-rules" hx-swap="innerHTML" onchange="handleRulesetChange(this)">
-                            <option value="Core Rules (2026)">CORE RULES (2026)</option>
-                            <option value="Total Warfare">TOTAL WARFARE</option>
-                            <option value="Introductory">INTRODUCTORY</option>
-                            <option value="Alpha Strike">ALPHA STRIKE</option>
+                        <select name="ruleset" hx-get="/ui/ruleset-options" hx-target="#optional-rules" hx-swap="innerHTML" onchange="handleRulesetChange(this)" style="color: var(--term-data);">
+                            <option value="Core Rules (2026)">Core Rules (2026)</option>
+                            <option value="Total Warfare">Total Warfare</option>
+                            <option value="Introductory">Introductory</option>
+                            <option value="Alpha Strike">Alpha Strike</option>
                         </select>
                     </div>
 
                     <div id="bv-container">
                         <label class="term-label">TARGET BV:</label>
-                        <input type="number" name="bv2" placeholder="E.G. 5000">
+                        <input type="number" name="bv2" placeholder="e.g. 5000">
                     </div>
 
                     <div id="pv-container" style="display: none;">
-                        <label class="term-label">TARGET PV (ALPHA STRIKE):</label>
-                        <input type="number" name="pv" placeholder="E.G. 250">
+                        <label class="term-label">TARGET PV:</label>
+                        <input type="number" name="pv" placeholder="e.g. 250">
                     </div>
 
                     <div id="bsp-container" style="display: none;">
-                        <label class="term-label">TARGET BSP (SUPPORT POINTS):</label>
-                        <input type="number" id="bsp-input" name="bsp" placeholder="E.G. 50">
+                        <label class="term-label">TARGET BSP:</label>
+                        <input type="number" id="bsp-input" name="bsp" placeholder="e.g. 50">
                     </div>
                     
                     <div>
                         <label class="term-label">MISSION TYPE:</label>
-                        <select name="mission_type">
-                            <option value="Skirmish">STAND-UP FIGHT</option>
-                            <option value="Breakthrough">OBJECTIVE RAID</option>
-                            <option value="Base Assault">EXTRACTION</option>
-                            <option value="Reconnaisance">HOLD THE LINE</option>
-                            <option value="Campaign Scenario">CAMPAIGN SCENARIO</option>
+                        <select name="mission_type" style="color: var(--term-data);">
+                            <option value="Skirmish">Skirmish</option>
+                            <option value="Breakthrough">Breakthrough</option>
+                            <option value="Base Assault">Base Assault</option>
+                            <option value="Reconnaisance">Reconnaisance</option>
+                            <option value="Campaign Scenario">Campaign Scenario</option>
                         </select>
                     </div>
                     <div>
                         <label class="term-label">FORCE COMPOSITION:</label>
-                        <select name="force_comp">
-                            <option value="BattleMech Only">BATTLEMECH ONLY</option>
-                            <option value="Combined Arms">COMBINED ARMS</option>
+                        <select name="force_comp" style="color: var(--term-data);">
+                            <option value="BattleMech Only">BattleMech Only</option>
+                            <option value="Combined Arms">Combined Arms</option>
                         </select>
                     </div>
                     
-                    <div class="panel" style="grid-column: span 2;">
+                    <div class="panel panel-host" style="grid-column: span 2;">
                         <label class="term-label">HOST FORCE ROSTER:</label>
                         <div style="display:flex; gap:10px; margin-top:10px;">
-                            <input type="text" id="host-unit-search" list="unit-datalist" placeholder="SEARCH UNIT (E.G. ATLAS AS7-D)..." style="margin-bottom:0;">
+                            <input type="text" id="host-unit-search" list="unit-datalist" placeholder="Search Unit (e.g. Atlas AS7-D)..." style="margin-bottom:0;">
                             <button type="button" onclick="addUnit('host')" style="margin-bottom:0; width:auto;" class="btn-outline">ADD TO ROSTER</button>
                         </div>
                         <ul id="host-roster-list" class="roster-list"></ul>
@@ -586,41 +602,41 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
 
                     <div style="grid-column: span 2;">
                         <label class="term-label">HOST ASSETS (OPTIONAL):</label>
-                        <input type="text" name="host_assets" placeholder="E.G. DESERT MATS, TOKENS, 3D TERRAIN">
+                        <input type="text" name="host_assets" placeholder="e.g. Desert Mats, Tokens, 3D Terrain">
                     </div>
                     
                     <div>
                         <label class="term-label">ERA:</label>
-                        <select name="era">
-                            <option value="ilClan">ILCLAN</option>
-                            <option value="Dark Age">DARK AGE</option>
-                            <option value="Jihad">JIHAD</option>
-                            <option value="Civil War">CIVIL WAR</option>
-                            <option value="Clan Invasion">CLAN INVASION</option>
-                            <option value="Succession Wars">SUCCESSION WARS</option>
-                            <option value="Star League">STAR LEAGUE</option>
+                        <select name="era" style="color: var(--term-data);">
+                            <option value="ilClan">ilClan</option>
+                            <option value="Dark Age">Dark Age</option>
+                            <option value="Jihad">Jihad</option>
+                            <option value="Civil War">Civil War</option>
+                            <option value="Clan Invasion">Clan Invasion</option>
+                            <option value="Succession Wars">Succession Wars</option>
+                            <option value="Star League">Star League</option>
                         </select>
                     </div>
                     <div>
                         <label class="term-label">INTEL LEVEL:</label>
-                        <select name="intel_level">
-                            <option value="Full Sweep (Revealed)">FULL SWEEP (REVEALED)</option>
-                            <option value="Partial Intercept">PARTIAL INTERCEPT</option>
-                            <option value="Total Blackout (Blind)">TOTAL BLACKOUT (BLIND)</option>
+                        <select name="intel_level" style="color: var(--term-data);">
+                            <option value="Full Sweep (Revealed)">Full Sweep (Revealed)</option>
+                            <option value="Partial Intercept">Partial Intercept</option>
+                            <option value="Total Blackout (Blind)">Total Blackout (Blind)</option>
                         </select>
                     </div>
                 </div>
 
                 <div id="optional-rules" class="checkbox-group">
-                    <label><input type="checkbox" name="rule_battlefield_support_assets" onchange="toggleBsp()"> BATTLEFIELD SUPPORT ASSETS</label>
-                    <label><input type="checkbox" name="rule_battlefield_support_strikes" onchange="toggleBsp()"> BATTLEFIELD SUPPORT STRIKES</label>
+                    <label><input type="checkbox" name="rule_Battlefield_Support_Assets" onchange="toggleBsp()"> Battlefield Support Assets</label>
+                    <label><input type="checkbox" name="rule_Battlefield_Support_Strikes" onchange="toggleBsp()"> Battlefield Support Strikes</label>
                 </div>
 
-                <button type="submit" class="btn-solid" style="width: 100%;">TRANSMIT CONTRACT</button>
+                <button type="submit" class="btn-primary" style="width: 100%;">TRANSMIT CONTRACT</button>
             </form>
         </div>
 
-        <h3>:: OPEN BOUNTIES ::</h3>
+        <h3 class="term-label">:: OPEN BOUNTIES ::</h3>
         <div id="board">
     "##,
         current_user = current_user,
@@ -645,8 +661,8 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
             }
 
             function toggleBsp() {
-                const bsa = document.querySelector('input[name="rule_battlefield_support_assets"]');
-                const bss = document.querySelector('input[name="rule_battlefield_support_strikes"]');
+                const bsa = document.querySelector('input[name="rule_Battlefield_Support_Assets"]');
+                const bss = document.querySelector('input[name="rule_Battlefield_Support_Strikes"]');
                 const bspContainer = document.getElementById('bsp-container');
                 
                 if ((bsa && bsa.checked) || (bss && bss.checked)) {
@@ -672,6 +688,11 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                 const hiddenInput = document.getElementById(hiddenId);
 
                 const li = document.createElement('li');
+                
+                // Color coordination for lists
+                if (prefix === 'challenger') {
+                    li.style.borderLeftColor = 'var(--term-purple)';
+                }
                 
                 const textSpan = document.createElement('span');
                 textSpan.innerText = val;
@@ -795,25 +816,30 @@ async fn get_board(jar: CookieJar, State(state): State<AppState>) -> Html<String
                 <title>LGS ComStar Terminal - Login</title>
                 <style>
                     :root {
-                        --term-bg: #050505;
-                        --term-fg: #ffb000;
-                        --term-dim: #a67300;
+                        --term-bg: #0d1117;
+                        --term-label: #58a6ff;
+                        --term-data: #c9d1d9;
+                        --term-border: #30363d;
+                        --term-dim: #8b949e;
                     }
-                    body { background-color: var(--term-bg); color: var(--term-fg); font-family: 'Courier New', Courier, monospace; font-size: 16px; max-width: 400px; margin: 100px auto; padding: 20px; text-align: center; text-shadow: 0 0 2px rgba(255, 176, 0, 0.4); text-transform: uppercase; }
-                    .card { border: 1px solid var(--term-fg); padding: 30px; background: var(--term-bg); box-shadow: inset 0 0 10px rgba(255, 176, 0, 0.05); }
-                    input, button { background: var(--term-bg); border: 1px solid var(--term-dim); color: var(--term-fg); padding: 12px; font-family: inherit; font-size: 1rem; margin-bottom: 20px; width: 100%; box-sizing: border-box; text-transform: uppercase; }
-                    input:focus { outline: none; border-color: var(--term-fg); box-shadow: 0 0 5px rgba(255, 176, 0, 0.3); }
-                    button { cursor: pointer; font-weight: bold; background: var(--term-fg); color: var(--term-bg); border-color: var(--term-fg); transition: 0.1s; }
-                    button:hover { background: var(--term-dim); border-color: var(--term-dim); }
+                    body { background-color: var(--term-bg); color: var(--term-data); font-family: 'Courier New', Courier, monospace; font-size: 16px; max-width: 400px; margin: 100px auto; padding: 20px; text-align: center; text-shadow: 0 0 1px rgba(201, 209, 217, 0.2); }
+                    .card { border: 1px solid var(--term-border); padding: 30px; background: #161b22; border-top: 3px solid var(--term-label); }
+                    input, button { background: transparent; border: 1px solid var(--term-border); color: var(--term-data); padding: 12px; font-family: inherit; font-size: 1rem; margin-bottom: 20px; width: 100%; box-sizing: border-box; }
+                    input:focus { outline: none; border-color: var(--term-label); box-shadow: 0 0 5px rgba(88, 166, 255, 0.2); }
+                    
+                    button { cursor: pointer; font-weight: bold; color: var(--term-label); border-color: var(--term-label); transition: 0.1s; text-transform: uppercase; }
+                    button:hover { background: var(--term-label); color: var(--term-bg); }
+                    
+                    .term-label { color: var(--term-label); text-transform: uppercase; margin-top: 0; letter-spacing: 1px;}
                     .term-dim { color: var(--term-dim); margin-bottom: 20px;}
                 </style>
             </head>
             <body>
                 <div class="card">
-                    <h2>:: COMSTAR UPLINK ::</h2>
+                    <h2 class="term-label">:: COMSTAR UPLINK ::</h2>
                     <p class="term-dim">IDENTIFY YOURSELF TO ACCESS THE MERCENARY BOARD.</p>
                     <form method="POST" action="/login">
-                        <input type="text" name="username" placeholder="ENTER CALLSIGN" required>
+                        <input type="text" name="username" placeholder="Enter Callsign" required>
                         <button type="submit">ESTABLISH UPLINK</button>
                     </form>
                 </div>
@@ -847,25 +873,25 @@ async fn login(jar: CookieJar, Form(input): Form<LoginForm>) -> (CookieJar, Html
 async fn get_ruleset_options(Query(query): Query<RulesetQuery>) -> Html<String> {
     let html = if query.ruleset.contains("Total Warfare") {
         r##"
-        <label><input type="checkbox" name="rule_floating_crits"> FLOATING CRITICALS</label>
-        <label><input type="checkbox" name="rule_forced_withdrawal"> FORCED WITHDRAWAL</label>
-        <label><input type="checkbox" name="rule_backward_level_change"> BACKWARDS LEVEL CHANGE</label>
-        <label><input type="checkbox" name="rule_initiative_die"> INITIATIVE DIE</label>
-        <label><input type="checkbox" name="rule_careful_stand"> CAREFUL STAND</label>
-        <label><input type="checkbox" name="rule_sprinting"> SPRINTING</label>
-        <label><input type="checkbox" name="rule_expanded_arm_flipping"> EXPANDED ARM FLIPPING</label>
-        <label><input type="checkbox" name="rule_front-loaded_deployment"> FRONT-LOADED DEPLOYMENT</label>
+        <label><input type="checkbox" name="rule_Floating_Crits"> Floating Criticals</label>
+        <label><input type="checkbox" name="rule_Forced_Withdrawal"> Forced Withdrawal</label>
+        <label><input type="checkbox" name="rule_Backward_Level_Change"> Backwards Level Change</label>
+        <label><input type="checkbox" name="rule_Initiative_Die"> Initiative Die</label>
+        <label><input type="checkbox" name="rule_Careful_Stand"> Careful Stand</label>
+        <label><input type="checkbox" name="rule_Sprinting"> Sprinting</label>
+        <label><input type="checkbox" name="rule_Expanded_Arm_Flipping"> Expanded Arm Flipping</label>
+        <label><input type="checkbox" name="rule_Front-Loaded_Deployment"> Front-Loaded Deployment</label>
         "##
     } else if query.ruleset.contains("Core Rules (2026)") {
         r##"
-        <label><input type="checkbox" name="rule_battlefield_support_assets" onchange="toggleBsp()"> BATTLEFIELD SUPPORT ASSETS</label>
-        <label><input type="checkbox" name="rule_battlefield_support_strikes" onchange="toggleBsp()"> BATTLEFIELD SUPPORT STRIKES</label>
-        <label><input type="checkbox" name="rule_initiative_die"> INITIATIVE DIE</label>
+        <label><input type="checkbox" name="rule_Battlefield_Support_Assets" onchange="toggleBsp()"> Battlefield Support Assets</label>
+        <label><input type="checkbox" name="rule_Battlefield_Support_Strikes" onchange="toggleBsp()"> Battlefield Support Strikes</label>
+        <label><input type="checkbox" name="rule_Initiative_Die"> Initiative Die</label>
         "##
     } else if query.ruleset.contains("Alpha Strike") {
         r##"
-        <label><input type="checkbox" name="rule_multiple_attack_rolls"> MULTIPLE ATTACK ROLLS</label>
-        <label><input type="checkbox" name="rule_variable_damage"> VARIABLE DAMAGE</label>
+        <label><input type="checkbox" name="rule_Multiple_Attack_Rolls"> Multiple Attack Rolls</label>
+        <label><input type="checkbox" name="rule_Variable_Damage"> Variable Damage</label>
         "##
     } else {
         r##"
@@ -887,7 +913,7 @@ async fn create_contract(
     let mut checked_rules: Vec<String> = input
         .iter()
         .filter(|(k, _)| k.starts_with("rule_"))
-        .map(|(k, _)| k.replace("rule_", "").replace("_", " ").to_uppercase())
+        .map(|(k, _)| k.replace("rule_", "").replace("_", " "))
         .collect();
     checked_rules.sort();
 
