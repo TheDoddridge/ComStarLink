@@ -634,9 +634,9 @@ fn render_board(contracts: &[Contract], current_user: &str) -> String {
                     <div>
                         <label class="term-label">INTEL LEVEL:</label>
                         <select name="intel_level" style="color: var(--term-data);">
-                            <option value="Full Sweep">Full Sweep (Revealed)</option>
+                            <option value="Full Sweep">Full Sweep</option>
                             <option value="Partial Intercept">Partial Intercept</option>
-                            <option value="Total Blackout">Total Blackout (Blind)</option>
+                            <option value="Total Blackout">Total Blackout</option>
                         </select>
                     </div>
                 </div>
